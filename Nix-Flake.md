@@ -68,82 +68,82 @@ from anywhere.
 
 We'll grab the required build tools from the `nixpkgs` repository, so the url of the unstable version of that repository becomes our first input. We'll also use the `flake-utils` module to deal with boring per-platform attribute sets and `gomod2nix` to generate Nix compatible hashes of Go packages. So we define the following attributes in the body of the `inputs` attribute of the flake template above:
 ```nix "input attributes"+=
-    nixpkgs.url = "github:nixos/nixpkgs/nixos-unstable";
-    flake-utils.url = "github:numtide/flake-utils";
+nixpkgs.url = "github:nixos/nixpkgs/nixos-unstable";
+flake-utils.url = "github:numtide/flake-utils";
 
-    gomod2nix = {
-      url = "github:tweag/gomod2nix";
-      inputs.nixpkgs.follows = "nixpkgs";
-      inputs.flake-utils.follows = "flake-utils";
-    };
+gomod2nix = {
+  url = "github:tweag/gomod2nix";
+  inputs.nixpkgs.follows = "nixpkgs";
+  inputs.flake-utils.follows = "flake-utils";
+};
 ```
 
 ### The `outputs` attribute
 
 The action all goes on in the `outputs` attribute. This is a function whose single argument is the `inputs` attribute set, specified in the last section, but with an extra entry with key `self` to refer to the current flake. We can access entries in that set by pattern matching on their keys.
 ```nix "output function"+=
-    { self, nixpkgs, flake-utils, gomod2nix }:
+{ self, nixpkgs, flake-utils, gomod2nix }:
 ```
 The expression before the `:` is the pattern we are matching, which in this case binds variables `self`, `nixpkgs`, `utils` and `gomod2nix` to the values of the correspondingly keyed entries of the argument in the body, which follows. 
 
 This flake applies to any of the platforms, so use the `eachDefaultSystem` function from the `flake-utils` module to instantiate it for each supported platform.
 ```nix "output function"+=
-      flake-utils.lib.eachDefaultSystem (system:
+  flake-utils.lib.eachDefaultSystem (system:
 ```
 The `system:` phrase, at the end of this line, is the head of a function with parameter `system` and whose body follows, and whose extent is delimited by surrounding parentheses `()`. The function `eachDefaultSystem` will execute that function once for each supported platform, passing it a string identifying that platform - `"x86_64-linux"`, `"aarch64-darwin"` etc.
 
 Now LMT doesn't appear to have a version number, so we'll generate a user-friendly one from the date that the source was last modified. When working out that date we are careful to be backward compatible with older versions of flakes.
 ```nix "output function"+=
-        let
-          lastModifiedDate = self.lastModifiedDate or self.lastModified or "19700101";
-          version = builtins.substring 0 8 lastModifiedDate;
+    let
+      lastModifiedDate = self.lastModifiedDate or self.lastModified or "19700101";
+      version = builtins.substring 0 8 lastModifiedDate;
 ```
 We also import `nixpkgs` here, adding support for `gomod2nix` by applying it as an *overlay*.
 ```nix "output function"+=
-          pkgs = import nixpkgs {
-            inherit system;
-            overlays = [ gomod2nix.overlays.default ];
-          };
-        in 
-        {
+      pkgs = import nixpkgs {
+        inherit system;
+        overlays = [ gomod2nix.overlays.default ];
+      };
+    in 
+    {
 ```
 
 Now we get to the meat of the matter, an attribute to build and package the LMT binary. This uses the `buildGoApplication` function provided in the `nixpkgs` repository. 
 ```nix "output function"+=
-          packages = {
-            lmt = pkgs.buildGoApplication {
-              pname = "lmt";
-              inherit version;
-              src = ./.;
-              vendorHash = null;
-              modules = ./gomod2nix.toml;
-            };
-          };
+      packages = {
+        lmt = pkgs.buildGoApplication {
+          pname = "lmt";
+          inherit version;
+          src = ./.;
+          vendorHash = null;
+          modules = ./gomod2nix.toml;
+        };
+      };
 
 ```
 The `gomod2nix.toml` file, referered to in the `modules` attribute, is generated from the `go.mod` module file using the `gomod2nix` tool, provided in the Nix development environment for this project. It contains Nix compatible hashes of the Go libaries which the build depends on. In this case, our project doesn't pull in any external libraries and so this file is largely trivial.  
 
 We also provide a development shell attribute which provides the various Go build tools and the `gomod2nix` tool
 ```nix "output function"+=
-          devShell = pkgs.mkShell {
-            buildInputs = with pkgs; [
-              go
-              gopls
-              gotools
-              go-tools
-              gomod2nix.packages.${system}.default
-            ];
-          };
+      devShell = pkgs.mkShell {
+        buildInputs = with pkgs; [
+          go
+          gopls
+          gotools
+          go-tools
+          gomod2nix.packages.${system}.default
+        ];
+      };
 
 ```
 and declare the default package for `nix build`.
 ```nix "output function"+=
-          defaultPackage = self.packages.${system}.lmt;
-        }
+      defaultPackage = self.packages.${system}.lmt;
+    }
 ```
 Finally, the function passed to `eachDefaultSystem` ends here.
 ```nix "output function"+=
-      )
+  )
 ```
 
 # Fin!
